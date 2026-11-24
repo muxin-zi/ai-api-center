@@ -43,6 +43,7 @@ import android.webkit.DownloadListener;
 import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -120,6 +121,11 @@ public class MainActivity extends Activity {
     private ProgressBar bar;
     private boolean webOpen = false;
     private ValueCallback<Uri[]> filePathCallback;
+    /** 覆盖在网页上的遮罩：换站时挡住上一家的旧页面，避免「看起来又进了一次上一家」 */
+    private View webVeil;
+    /** 这次加载完成后要清一次历史（把上一家平台的记录清掉） */
+    private boolean historyResetPending = false;
+    private Runnable veilTimeout;
 
     /* 选平台页 */
     private LinearLayout pickPage;
@@ -1661,6 +1667,19 @@ public class MainActivity extends Activity {
         wlp.topMargin = dp(50);
         webPage.addView(web, wlp);
 
+        /* 遮罩：换平台时 WebView 会先把上一家的页面画出来（尤其是已缓存的平台），
+           看起来就像「又进了一次上一家」。用一层底色盖住，等新页面可以绘制了再揭开。 */
+        FrameLayout veil = new FrameLayout(this);
+        veil.setBackgroundColor(BG);
+        veil.setVisibility(View.GONE);
+        TextView vt = text("载入中…", 11f, TXT3, false);
+        vt.setGravity(Gravity.CENTER);
+        veil.addView(vt, new FrameLayout.LayoutParams(MATCH, MATCH));
+        FrameLayout.LayoutParams vlp = new FrameLayout.LayoutParams(MATCH, MATCH);
+        vlp.topMargin = dp(50);
+        webPage.addView(veil, vlp);
+        webVeil = veil;
+
         bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(100);
         bar.setProgressDrawable(barDrawable());
@@ -1707,14 +1726,35 @@ public class MainActivity extends Activity {
         detailPage.setVisibility(View.GONE);
         homeScroll.setVisibility(View.GONE);
         webOpen = true;
-        if (web != null) {
-            web.getSettings().setUserAgentString(ua());
-            /* 不 clearHistory 的话，换个平台打开会叠在上一家的历史栈上面，
-               用户按返回会退回上一个平台的页面 —— 就是「进 ds 之后再进别家会先见到 ds」 */
-            web.stopLoading();
-            web.clearHistory();
-            web.loadUrl(url);
-        }
+        if (web == null) return;
+
+        web.getSettings().setUserAgentString(ua());
+        showVeil();
+
+        /* 关键：clearHistory() 只清「除当前页以外」的记录，当前页会留在历史里。
+           所以进过 A 再进 B 之后历史是 [A, B]，按返回就退回 A —— 这就是「叠加」。
+           办法是正常加载 B，等 B 加载完再 clearHistory：这时「当前页」正是 B，
+           被清掉的正好是 A 留下的那些记录。 */
+        historyResetPending = true;
+        web.stopLoading();
+        web.loadUrl(url);
+    }
+
+    private void showVeil() {
+        if (webVeil == null) return;
+        webVeil.setVisibility(View.VISIBLE);
+        if (veilTimeout != null) webVeil.removeCallbacks(veilTimeout);
+        /* 兜底：页面始终没提交（被拦截 / 一直转圈）也要把遮罩揭开，不能让人对着空屏 */
+        veilTimeout = () -> {
+            if (webVeil != null) webVeil.setVisibility(View.GONE);
+        };
+        webVeil.postDelayed(veilTimeout, 8000);
+    }
+
+    private void hideVeil() {
+        if (webVeil == null) return;
+        if (veilTimeout != null) webVeil.removeCallbacks(veilTimeout);
+        webVeil.setVisibility(View.GONE);
     }
 
     private void closeWeb() {
@@ -2166,6 +2206,27 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
                 return handleScheme(req.getUrl().toString());
+            }
+
+            @Override
+            public void onPageFinished(WebView v, String url) {
+                /* 新页面到位了，把上一家平台留在历史里的记录清掉，返回键就不会退回上一家 */
+                if (historyResetPending) {
+                    historyResetPending = false;
+                    v.clearHistory();
+                }
+                hideVeil();
+            }
+
+            /* 新页面已经可以绘制，旧页面的内容这时一定被换掉了，可以揭开遮罩 */
+            @Override
+            public void onPageCommitVisible(WebView v, String url) {
+                hideVeil();
+            }
+
+            @Override
+            public void onReceivedError(WebView v, WebResourceRequest req, WebResourceError err) {
+                if (req != null && req.isForMainFrame()) hideVeil();
             }
         });
 

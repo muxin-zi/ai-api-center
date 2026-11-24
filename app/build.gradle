@@ -8,8 +8,8 @@ android {
         applicationId "io.github.muxinzi.aihub"
         minSdk 23
         targetSdk 34
-        versionCode 7
-        versionName "2.3"
+        versionCode 9
+        versionName "2.4"
     }
 
     buildTypes {
