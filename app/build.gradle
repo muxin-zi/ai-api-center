@@ -1,0 +1,31 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'io.github.muxinzi.aihub'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "io.github.muxinzi.aihub"
+        minSdk 23
+        targetSdk 34
+        versionCode 7
+        versionName "2.3"
+    }
+
+    buildTypes {
+        debug { minifyEnabled false }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    lintOptions {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+}
